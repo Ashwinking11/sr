@@ -36,12 +36,9 @@ def process_video(message):
 
         # Download video file (streaming approach)
         file_info = bot.get_file(file_id)
-        downloaded_file = bot.download_file(file_info.file_path)
-
-        # Save video file locally
+        download_url = f'https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}'
         video_filename = f"{file_id}.mp4"
-        with open(video_filename, 'wb') as f:
-            f.write(downloaded_file)
+        subprocess.run(['wget', '-O', video_filename, download_url], check=True)
 
         # Process video to remove audio and subtitles using ffmpeg
         start_time = time.time()
