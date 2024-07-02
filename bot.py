@@ -3,9 +3,15 @@ from pyrogram.types import Message
 import os
 import time
 import subprocess
+from config import BOT_TOKEN, API_ID, API_HASH
 
 # Initialize your Pyrogram client
-app = Client("my_bot")
+app = Client(
+    "my_bot",
+    bot_token=BOT_TOKEN,
+    api_id=API_ID,
+    api_hash=API_HASH
+)
 
 # Function to calculate file size in a human-readable format
 def sizeof_fmt(num, suffix='B'):
@@ -66,7 +72,7 @@ async def remove_stream(bot, message: Message):
             return
 
         # Download video file (streaming approach)
-        download_url = f'https://api.telegram.org/file/bot{app.export_session_string().split(":")[2]}/{file_info.file_path}'
+        download_url = f'https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}'
         video_filename = f"{file_id}.mp4"
 
         # Process video to remove audio and subtitles using ffmpeg (chunked processing)
