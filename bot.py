@@ -24,9 +24,9 @@ def process_video(message):
     try:
         chat_id = message.chat.id
         file_id = message.video.file_id
+        max_file_size = 2 * 1024 * 1024 * 1024  # 2 GB in bytes
 
         # Check file size (limit to 2 GB)
-        max_file_size = 2 * 1024 * 1024 * 1024  # 2 GB in bytes
         if message.video.file_size > max_file_size:
             send_status_message(chat_id, "Error: The video file is too large. Please send a smaller file.")
             return
@@ -38,13 +38,12 @@ def process_video(message):
         file_info = bot.get_file(file_id)
         download_url = f'https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}'
         video_filename = f"{file_id}.mp4"
-        subprocess.run(['wget', '-O', video_filename, download_url], check=True)
 
-        # Process video to remove audio and subtitles using ffmpeg
+        # Process video to remove audio and subtitles using ffmpeg (chunked processing)
         start_time = time.time()
         output_filename = f"processed_{file_id}.mp4"
         ffmpeg_cmd = [
-            'ffmpeg', '-i', video_filename,
+            'ffmpeg', '-i', download_url,
             '-c:v', 'copy',       # Copy video stream
             '-an', '-sn',         # Remove audio and subtitles
             output_filename
@@ -61,7 +60,6 @@ def process_video(message):
             bot.send_video(chat_id, f, caption="Processed video")
 
         # Clean up temporary files
-        os.remove(video_filename)
         os.remove(output_filename)
 
         # Send final status message with processing details
