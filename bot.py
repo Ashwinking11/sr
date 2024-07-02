@@ -9,15 +9,18 @@ bot = telebot.TeleBot(BOT_TOKEN)
 # Handler for '/start' command
 @bot.message_handler(commands=['start'])
 def handle_start(message):
-    """
-    Handle the /start command to greet the user.
-    """
     bot.send_message(message.chat.id, "Welcome! Send me a video file and I will remove audio and subtitles.")
 
 # Handler for video messages
 @bot.message_handler(content_types=['video'])
 def handle_video(message):
     try:
+        # Check file size (limit to 20MB)
+        max_file_size = 20000 * 1024 * 1024  # 20 MB in bytes
+        if message.video.file_size > max_file_size:
+            bot.send_message(message.chat.id, "Error: The video file is too large. Please send a smaller file.")
+            return
+        
         # Download video file
         file_id = message.video.file_id
         file_info = bot.get_file(file_id)
@@ -52,9 +55,6 @@ def handle_video(message):
 # Handle all other messages
 @bot.message_handler(func=lambda message: True)
 def handle_all(message):
-    """
-    Handle all other types of messages by instructing the user to send a video file.
-    """
     bot.send_message(message.chat.id, "Send me a video file to process.")
 
 # Polling to keep the bot running
