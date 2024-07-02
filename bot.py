@@ -78,4 +78,26 @@ async def remove_stream(bot, message: Message):
             '-an', '-sn',         # Remove audio and subtitles
             output_filename
         ]
-        subprocess.run(ffmpeg_cmd, you execute even
+        subprocess.run(ffmpeg_cmd, check=True)
+
+        # Calculate processing time and speed
+        processing_time = time.time() - start_time
+        processed_size = os.path.getsize(output_filename)
+        processing_speed = processed_size / processing_time if processing_time > 0 else 0
+
+        # Send processed video back to user
+        with open(output_filename, 'rb') as f:
+            await bot.send_video(chat_id=message.chat.id, video=f, caption="Processed video")
+
+        # Clean up temporary files
+        os.remove(output_filename)
+
+        # Send final status message with processing details
+        status_message_text = f"Processing complete\nTime taken: {processing_time:.2f} seconds\nProcessed size: {sizeof_fmt(processed_size)}\nProcessing speed: {sizeof_fmt(processing_speed)}/s"
+        await ms.edit(status_message_text)
+
+    except Exception as e:
+        await ms.edit(f"Error processing video: {str(e)}")
+
+# Start the bot
+app.run()
