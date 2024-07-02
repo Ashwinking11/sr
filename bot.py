@@ -34,13 +34,28 @@ async def progress_for_pyrogram(current, total, message, start_time):
 @app.on_message(filters.command(["download"]))
 async def download_media(bot, message: Message):
     try:
+        # Check if message contains media
+        if not (message.video or message.document or message.audio):
+            await message.reply("This message doesn't contain any downloadable media.")
+            return
+
         # Initial message indicating download attempt
         ms = await message.reply("Trying to download...")
 
+        # Determine the type of media and set the file_path accordingly
+        if message.video:
+            file_path = "downloads/video.mp4"
+            media = message.video
+        elif message.document:
+            file_path = "downloads/document"
+            media = message.document
+        elif message.audio:
+            file_path = "downloads/audio.mp3"
+            media = message.audio
+
         # Download media file with progress callback
-        file_path = "downloads/"
         await bot.download_media(
-            message=message,
+            message=media,
             file_name=file_path,
             progress=progress_for_pyrogram,
             progress_args=(ms, time.time())
@@ -57,6 +72,11 @@ async def download_media(bot, message: Message):
 @app.on_message(filters.command(["removestream"]))
 async def remove_stream(bot, message: Message):
     try:
+        # Check if message contains video
+        if not message.video:
+            await message.reply("This message doesn't contain a video.")
+            return
+
         # Initial message indicating processing start
         ms = await message.reply("Processing video...")
 
@@ -71,15 +91,14 @@ async def remove_stream(bot, message: Message):
             await ms.edit("Error: The video file is too large. Please send a smaller file.")
             return
 
-        # Download video file (streaming approach)
-        download_url = f'https://api.telegram.org/file/bot{BOT_TOKEN}/{file_info.file_path}'
-        video_filename = f"{file_id}.mp4"
+        # Download video file
+        path = await bot.download_media(message=file_info, file_name=file_id + ".mp4", progress=progress_for_pyrogram, progress_args=(ms, time.time()))
 
-        # Process video to remove audio and subtitles using ffmpeg (chunked processing)
+        # Process video to remove audio and subtitles using ffmpeg
         start_time = time.time()
         output_filename = f"processed_{file_id}.mp4"
         ffmpeg_cmd = [
-            'ffmpeg', '-i', download_url,
+            'ffmpeg', '-i', path,
             '-c:v', 'copy',       # Copy video stream
             '-an', '-sn',         # Remove audio and subtitles
             output_filename
@@ -90,7 +109,6 @@ async def remove_stream(bot, message: Message):
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
         processing_speed = processed_size / processing_time if processing_time > 0 else 0
-
         # Send processed video back to user
         with open(output_filename, 'rb') as f:
             await bot.send_video(chat_id=message.chat.id, video=f, caption="Processed video")
