@@ -1,127 +1,132 @@
-from pyrogram import Client, filters
-from pyrogram.types import Message
 import os
 import time
-import subprocess
+import math
+import asyncio
+import imageio_ffmpeg as ffmpeg
+from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from config import BOT_TOKEN, API_ID, API_HASH
 
 # Initialize your Pyrogram client
 app = Client(
-    "my_bot",
+    "stream_remover_bot",
     bot_token=BOT_TOKEN,
     api_id=API_ID,
     api_hash=API_HASH
 )
 
-# Function to calculate file size in a human-readable format
-def sizeof_fmt(num, suffix='B'):
-    for unit in ['','Ki','Mi','Gi','Ti','Pi','Ei','Zi']:
-        if abs(num) < 1024.0:
-            return f"{num:.1f} {unit}{suffix}"
-        num /= 1024.0
-    return f"{num:.1f} Yi{suffix}"
+PROGRESS_TEMPLATE = """
+Progress: {0}%
+Downloaded: {1} / {2}
+Speed: {3}/s
+ETA: {4}
+"""
 
-# Progress callback function for download
-async def progress_for_pyrogram(current, total, message, start_time):
-    # Calculate progress percentage
-    progress_percent = (current / total) * 100
-    elapsed_time = time.time() - start_time
+async def progress_callback(current, total, message, start_time):
+    now = time.time()
+    elapsed_time = now - start_time
+    if elapsed_time == 0:
+        elapsed_time = 1  # Avoid division by zero
 
-    # Update message with progress status
-    await message.edit(f"Downloading... {progress_percent:.2f}%\nElapsed Time: {elapsed_time:.2f} seconds")
+    speed = current / elapsed_time
+    percentage = current * 100 / total
+    eta = (total - current) / speed
 
-# Command handler to trigger media download
-@app.on_message(filters.command(["download"]))
-async def download_media(bot, message: Message):
+    progress_str = "[{0}{1}]".format(
+        ''.join(["⬢" for _ in range(math.floor(percentage / 10))]),
+        ''.join(["⬡" for _ in range(10 - math.floor(percentage / 10))])
+    )
+    tmp = progress_str + PROGRESS_TEMPLATE.format(
+        round(percentage, 2),
+        human_readable_size(current),
+        human_readable_size(total),
+        human_readable_size(speed),
+        time_formatter(eta)
+    )
+
     try:
-        # Check if message contains media
-        if not (message.video or message.document or message.audio):
-            await message.reply("This message doesn't contain any downloadable media.")
-            return
-
-        # Initial message indicating download attempt
-        ms = await message.reply("Trying to download...")
-
-        # Determine the type of media and set the file_path accordingly
-        if message.video:
-            file_path = "downloads/video.mp4"
-            media = message.video
-        elif message.document:
-            file_path = "downloads/document"
-            media = message.document
-        elif message.audio:
-            file_path = "downloads/audio.mp3"
-            media = message.audio
-
-        # Download media file with progress callback
-        await bot.download_media(
-            message=media,
-            file_name=file_path,
-            progress=progress_for_pyrogram,
-            progress_args=(ms, time.time())
+        await message.edit(
+            text=tmp,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("Owner", url='https://t.me/atxbots')]]
+            )
         )
-
-        # If download successful, update message
-        await ms.edit("Download complete!")
-
     except Exception as e:
-        # If an error occurs during download, update message with error details
-        await ms.edit(f"Error downloading: {e}")
+        print(f"Error updating progress: {e}")
 
-# Command handler to trigger stream removal
-@app.on_message(filters.command(["removestream"]))
-async def remove_stream(bot, message: Message):
+def human_readable_size(size):
+    power = 1024
+    n = 0
+    power_labels = {0: '', 1: 'Ki', 2: 'Mi', 3: 'Gi', 4: 'Ti'}
+    while size > power:
+        size /= power
+        n += 1
+    return f"{size:.2f} {power_labels[n]}B"
+
+def time_formatter(seconds):
+    minutes, seconds = divmod(int(seconds), 60)
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    time_str = ((f"{days}d, " if days else "") +
+                (f"{hours}h, " if hours else "") +
+                (f"{minutes}m, " if minutes else "") +
+                (f"{seconds}s, " if seconds else ""))
+    return time_str.strip(', ')
+
+@app.on_message(filters.command("start"))
+async def start_command(bot, message: Message):
+    welcome_text = (
+        "Hello! I am the Stream Remover Bot.\n\n"
+        "I can help you remove audio and subtitles from video files.\n\n"
+        "To use me, simply forward a video to this chat, and I will process it for you.\n\n"
+        "Owner: [@atxbots](https://t.me/atxbots)"
+    )
+    await message.reply(welcome_text, parse_mode=ParseMode.MARKDOWN)
+
+@app.on_message(filters.video & filters.forwarded)
+async def process_forwarded_video(bot, message: Message):
     try:
-        # Check if message contains video
-        if not message.video:
-            await message.reply("This message doesn't contain a video.")
-            return
-
-        # Initial message indicating processing start
         ms = await message.reply("Processing video...")
 
-        # Get media information
         file_info = message.video
         file_id = file_info.file_id
         file_size = file_info.file_size
+        file_path = f"downloads/{file_id}.mp4"
 
-        # Check file size (limit to 2 GB)
-        max_file_size = 2 * 1024 * 1024 * 1024  # 2 GB in bytes
-        if file_size > max_file_size:
+        if file_size > 2 * 1024 * 1024 * 1024:
             await ms.edit("Error: The video file is too large. Please send a smaller file.")
             return
 
-        # Download video file
-        path = await bot.download_media(message=file_info, file_name=file_id + ".mp4", progress=progress_for_pyrogram, progress_args=(ms, time.time()))
+        await bot.download_media(message, file_path, progress=progress_callback, progress_args=(ms, time.time()))
 
-        # Process video to remove audio and subtitles using ffmpeg
         start_time = time.time()
         output_filename = f"processed_{file_id}.mp4"
-        ffmpeg_cmd = [
-            'ffmpeg', '-i', path,
-            '-c:v', 'copy',       # Copy video stream
-            '-an', '-sn',         # Remove audio and subtitles
+        ffmpeg_cmd = (
+            ffmpeg.get_ffmpeg_exe(), '-i', file_path,
+            '-c:v', 'copy',
+            '-an', '-sn',
             output_filename
-        ]
+        )
         subprocess.run(ffmpeg_cmd, check=True)
 
-        # Calculate processing time and speed
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
-        processing_speed = processed_size / processing_time if processing_time > 0 else 0
-        # Send processed video back to user
-        with open(output_filename, 'rb') as f:
-            await bot.send_video(chat_id=message.chat.id, video=f, caption="Processed video")
 
-        # Clean up temporary files
+        await bot.send_document(
+            chat_id=message.chat.id,
+            document=output_filename,
+            caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}"
+        )
+
+        os.remove(file_path)
         os.remove(output_filename)
-
-        # Send final status message with processing details
-        status_message_text = f"Processing complete\nTime taken: {processing_time:.2f} seconds\nProcessed size: {sizeof_fmt(processed_size)}\nProcessing speed: {sizeof_fmt(processing_speed)}/s"
-        await ms.edit(status_message_text)
-
+        except subprocess.CalledProcessError as e:
+        await ms.edit(f"Error processing video: {e}")
     except Exception as e:
-        await ms.edit(f"Error processing video: {str(e)}")
+        await ms.edit(f"An error occurred: {e}")
 
-# Start the bot
-app.run()
+if name == "main":
+    if not os.path.exists("downloads"):
+        os.makedirs("downloads")
+    app.run()
