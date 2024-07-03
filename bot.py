@@ -6,7 +6,7 @@ import subprocess
 import imageio_ffmpeg as ffmpeg
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
 from config import BOT_TOKEN, API_ID, API_HASH
 
 # Initialize your Pyrogram client
@@ -114,14 +114,24 @@ async def process_forwarded_video(bot, message: Message):
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
 
-        await bot.send_document(
-            chat_id=message.chat.id,
-            document=output_filename,
-            caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}"
-        )
+        await ms.edit(f"Processing complete.\n"
+                     f"Size: {human_readable_size(processed_size)}\n"
+                     f"Processing Time: {time_formatter(processing_time)}")
+
+        # Get available streams
+        audio_streams, subtitle_streams = get_available_streams(output_filename)
+
+        # Prepare inline keyboard with options to remove streams
+        keyboard = []
+        if audio_streams:
+            keyboard.append([InlineKeyboardButton(f"Remove Audio ({audio_streams})", callback_data=f"remove_audio_{file_id}")])
+        if subtitle_streams:
+            keyboard.append([InlineKeyboardButton(f"Remove Subtitles ({subtitle_streams})", callback_data=f"remove_subtitles_{file_id}")])
+
+        if keyboard:
+            await ms.reply_text("Select streams to remove:", reply_markup=InlineKeyboardMarkup(keyboard))
 
         os.remove(file_path)
-        os.remove(output_filename)
 
     except subprocess.CalledProcessError as e:
         await ms.edit(f"Error processing video: {e}")
@@ -129,8 +139,55 @@ async def process_forwarded_video(bot, message: Message):
     except Exception as e:
         await ms.edit(f"An error occurred: {e}")
 
+@app.on_callback_query()
+async def callback_handler(bot, query: CallbackQuery):
+    try:
+        file_id = query.data.split("_")[-1]
+        output_filename = f"processed_{file_id}.mp4"
+
+        if query.data.startswith("remove_audio"):
+            # Remove audio stream
+            ffmpeg_cmd = (
+                ffmpeg.get_ffmpeg_exe(), '-i', output_filename,
+                '-c:v', 'copy', '-an',
+                f"removed_audio_{output_filename}"
+            )
+            subprocess.run(ffmpeg_cmd, check=True)
+            await query.answer("Audio stream removed.")
+
+        elif query.data.startswith("remove_subtitles"):
+            # Remove subtitle stream
+            ffmpeg_cmd = (
+                ffmpeg.get_ffmpeg_exe(), '-i', output_filename,
+                '-c:v', 'copy', '-c:s', 'copy', '-sn',
+                f"removed_subtitles_{output_filename}"
+            )
+            subprocess.run(ffmpeg_cmd, check=True)
+            await query.answer("Subtitles removed.")
+
+        # Upload the processed file
+        await bot.send_document(
+            chat_id=query.message.chat.id,
+            document=f"removed_{output_filename}",
+            caption="Processed video with selected streams removed."
+        )
+
+        os.remove(output_filename)
+        os.remove(f"removed_{output_filename}")
+
+    except subprocess.CalledProcessError as e:
+        await query.answer(f"Error: {e}")
+
+    except Exception as e:
+        await query.answer(f"An error occurred: {e}")
+
+def get_available_streams(filename):
+    # Function to determine available audio and subtitle streams
+    # Implement your logic to extract stream information from the video file
+    # Replace with your actual implementation
+    return "2", "English"
+
 if __name__ == "__main__":
     if not os.path.exists("downloads"):
         os.makedirs("downloads")
     app.run()
-
