@@ -92,7 +92,7 @@ async def start_command(bot, message: Message):
         "To use me, simply forward a video to this chat, and I will process it for you.\n\n"
         "Owner: [@atxbots](https://t.me/atxbots)"
     )
-    await message.reply(welcome_text, parse_mode='markdown')
+    await message.reply(welcome_text, parse_mode='Markdown')
 
 @app.on_message(filters.video & filters.forwarded)
 async def process_forwarded_video(bot, message: Message):
@@ -122,25 +122,18 @@ async def process_forwarded_video(bot, message: Message):
 
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
-
         await ms.edit(f"Processing complete.\n"
-                     f"Size: {human_readable_size(processed_size)}\n"
-                     f"Processing Time: {time_formatter(processing_time)}")
+                      f"Size: {human_readable_size(processed_size)}\n"
+                      f"Processing Time: {time_formatter(processing_time)}")
 
-        # Get available streams
-        audio_streams, subtitle_streams = get_available_streams(output_filename)
-
-        # Prepare inline keyboard with options to remove streams
-        keyboard = []
-        if audio_streams:
-            keyboard.append([InlineKeyboardButton(f"Remove Audio ({audio_streams})", callback_data=f"remove_audio_{file_id}")])
-        if subtitle_streams:
-            keyboard.append([InlineKeyboardButton(f"Remove Subtitles ({subtitle_streams})", callback_data=f"remove_subtitles_{file_id}")])
-
-        if keyboard:
-            await ms.reply_text("Select streams to remove:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await bot.send_document(
+            chat_id=message.chat.id,
+            document=output_filename,
+            caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}"
+        )
 
         os.remove(file_path)
+        os.remove(output_filename)
 
     except subprocess.CalledProcessError as e:
         await ms.edit(f"Error processing video: {e}")
@@ -205,7 +198,7 @@ async def admin_comment_command(bot, message: Message):
         await message.reply(f"Admin Comment: {comment}")
 
     except Exception as e:
-        await message.reply(f"An error occurred: {e}")
+        await message.reply(f"An error occurred: {e}") 
 
 if __name__ == "__main__":
     if not os.path.exists("downloads"):
