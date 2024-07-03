@@ -5,13 +5,14 @@ import subprocess
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from config import BOT_TOKEN, API_ID, API_HASH  # Import credentials from config.py
 
 # Initialize your Pyrogram client
 app = Client(
     "stream_remover_bot",
-    bot_token="YOUR_BOT_TOKEN_HERE",
-    api_id=12345,  # Replace with your API_ID
-    api_hash="YOUR_API_HASH_HERE"
+    bot_token=BOT_TOKEN,
+    api_id=API_ID,
+    api_hash=API_HASH
 )
 
 # Directory for storing downloaded files
@@ -171,4 +172,3 @@ async def process_forwarded_video(bot, message: Message):
 
 if __name__ == "__main__":
     app.run()
-
