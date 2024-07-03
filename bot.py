@@ -3,10 +3,12 @@ import time
 import math
 import asyncio
 import subprocess
-import imageio_ffmpeg as ffmpeg
+import hashlib
 from pyrogram import Client, filters
-from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
+from pyrogram.errors import MessageNotModified
+from pyrogram.enums import ParseMode
+import imageio_ffmpeg as ffmpeg
 from config import BOT_TOKEN, API_ID, API_HASH
 
 # Initialize your Pyrogram client
@@ -24,6 +26,11 @@ Speed: {3}/s
 ETA: {4}
 """
 
+# Generate a shorter unique ID from file_id
+def generate_short_id(file_id):
+    return hashlib.sha256(file_id.encode()).hexdigest()[:10]
+
+# Progress callback function
 async def progress_callback(current, total, message, start_time):
     now = time.time()
     elapsed_time = now - start_time
@@ -50,12 +57,16 @@ async def progress_callback(current, total, message, start_time):
         await message.edit(
             text=tmp,
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Owner", url='https://t.me/atxbots')]]
+                [
+                    [InlineKeyboardButton("Remove Audio", callback_data=f"audio_{message.message_id}_{generate_short_id(message.video.file_id)}")],
+                    [InlineKeyboardButton("Remove Subtitles", callback_data=f"subtitles_{message.message_id}_{generate_short_id(message.video.file_id)}")]
+                ]
             )
         )
-    except Exception as e:
-        print(f"Error updating progress: {e}")
+    except MessageNotModified:
+        pass  # Ignore if message content hasn't changed
 
+# Human-readable size function
 def human_readable_size(size):
     power = 1024
     n = 0
@@ -65,6 +76,7 @@ def human_readable_size(size):
         n += 1
     return f"{size:.2f} {power_labels[n]}B"
 
+# Time formatter function
 def time_formatter(seconds):
     minutes, seconds = divmod(int(seconds), 60)
     hours, minutes = divmod(minutes, 60)
@@ -75,6 +87,7 @@ def time_formatter(seconds):
                 (f"{seconds}s, " if seconds else ""))
     return time_str.strip(', ')
 
+# Start command handler
 @app.on_message(filters.command("start"))
 async def start_command(bot, message: Message):
     welcome_text = (
@@ -85,6 +98,7 @@ async def start_command(bot, message: Message):
     )
     await message.reply(welcome_text, parse_mode=ParseMode.MARKDOWN)
 
+# Video processing handler
 @app.on_message(filters.video & filters.forwarded)
 async def process_forwarded_video(bot, message: Message):
     try:
@@ -99,85 +113,90 @@ async def process_forwarded_video(bot, message: Message):
             await ms.edit("Error: The video file is too large. Please send a smaller file.")
             return
 
+        # Download the video file
         await bot.download_media(message, file_path, progress=progress_callback, progress_args=(ms, time.time()))
 
         start_time = time.time()
         output_filename = f"processed_{file_id}.mp4"
-        ffmpeg_cmd = (
+
+        # Use ffmpeg to process the video: copy video stream, remove audio and subtitles
+        ffmpeg_cmd = [
             ffmpeg.get_ffmpeg_exe(), '-i', file_path,
-            '-c:v', 'copy',
-            '-an', '-sn',
+            '-c:v', 'copy', '-an', '-sn',
             output_filename
-        )
+        ]
         subprocess.run(ffmpeg_cmd, check=True)
 
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
 
-        # Send the processed video
+        # Send the processed video as a document with options to remove audio and subtitles
         await bot.send_document(
             chat_id=message.chat.id,
             document=output_filename,
             caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}",
             reply_markup=InlineKeyboardMarkup(
                 [
-                    [InlineKeyboardButton("Remove Audio", callback_data=f"remove_audio_{file_id}")],
-                    [InlineKeyboardButton("Remove Subtitles", callback_data=f"remove_subtitles_{file_id}")]
+                    [InlineKeyboardButton("Remove Audio", callback_data=f"audio_{message.message_id}_{generate_short_id(file_id)}")],
+                    [InlineKeyboardButton("Remove Subtitles", callback_data=f"subtitles_{message.message_id}_{generate_short_id(file_id)}")]
                 ]
             )
         )
 
+        # Cleanup: Remove temporary files
         os.remove(file_path)
         os.remove(output_filename)
-
-    except subprocess.CalledProcessError as e:
-        await ms.edit(f"Error processing video: {e}")
 
     except Exception as e:
         await ms.edit(f"An error occurred: {e}")
 
+# Callback query handler
 @app.on_callback_query()
 async def callback_handler(bot, query: CallbackQuery):
     try:
-        file_id = query.data.split("_")[-1]
-        output_filename = f"processed_{file_id}.mp4"
+        # Extract action and file_id from callback data
+        action, message_id, short_id = query.data.split("_")
 
-        if query.data.startswith("remove_audio"):
-            # Remove audio stream
-            ffmpeg_cmd = (
+        # Retrieve original file_id associated with short_id (if needed)
+        # file_id = get_file_id_from_short_id(short_id)
+
+        if action == "audio":
+            # Remove audio stream from the processed video
+            output_filename = f"processed_{short_id}.mp4"
+            ffmpeg_cmd = [
                 ffmpeg.get_ffmpeg_exe(), '-i', output_filename,
                 '-c:v', 'copy', '-an',
                 f"removed_audio_{output_filename}"
-            )
+            ]
             subprocess.run(ffmpeg_cmd, check=True)
             await query.answer("Audio stream removed.")
 
-        elif query.data.startswith("remove_subtitles"):
-            # Remove subtitle stream
-            ffmpeg_cmd = (
+        elif action == "subtitles":
+            # Remove subtitle stream from the processed video
+            output_filename = f"processed_{short_id}.mp4"
+            ffmpeg_cmd = [
                 ffmpeg.get_ffmpeg_exe(), '-i', output_filename,
                 '-c:v', 'copy', '-c:s', 'copy', '-sn',
                 f"removed_subtitles_{output_filename}"
-            )
+            ]
             subprocess.run(ffmpeg_cmd, check=True)
             await query.answer("Subtitles removed.")
 
-        # Upload the processed file
+        # Upload the processed file with removed streams
         await bot.send_document(
             chat_id=query.message.chat.id,
             document=f"removed_{output_filename}",
             caption="Processed video with selected streams removed."
         )
 
+        # Cleanup: Remove temporary files
         os.remove(output_filename)
         os.remove(f"removed_{output_filename}")
-
-    except subprocess.CalledProcessError as e:
-        await query.answer(f"Error: {e}")
 
     except Exception as e:
         await query.answer(f"An error occurred: {e}")
 
+# Run the bot
 if __name__ == "__main__":
     if not os.path.exists("downloads"):
         os.makedirs("downloads")
