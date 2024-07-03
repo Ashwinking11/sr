@@ -3,7 +3,6 @@ import time
 import math
 import subprocess
 from pyrogram import Client, filters
-from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from config import BOT_TOKEN, API_ID, API_HASH
 
@@ -55,7 +54,7 @@ async def progress_callback(current, total, message, start_time):
         await message.edit(
             text=tmp,
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Owner", url='https://t.me/atxbots')]]
+                [[InlineKeyboardButton("Remove Stream", callback_data=f"remove_stream:{message.message_id}")]]
             )
         )
     except Exception as e:
@@ -88,7 +87,7 @@ async def start_command(bot, message: Message):
         "To use me, simply forward a video to this chat, and I will process it for you.\n\n"
         "Owner: [@atxbots](https://t.me/atxbots)"
     )
-    await message.reply(welcome_text, parse_mode=ParseMode.MARKDOWN)
+    await message.reply(welcome_text, parse_mode="markdown")
 
 @app.on_message(filters.video & filters.forwarded)
 async def process_forwarded_video(bot, message: Message):
@@ -117,19 +116,14 @@ async def process_forwarded_video(bot, message: Message):
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
 
-        # Send the processed video with stream options
-        caption = f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}"
-        reply_markup = InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("Auto", callback_data=f"stream_auto_{file_id}")],
-                [InlineKeyboardButton("Subtitle", callback_data=f"stream_subtitle_{file_id}")]
-            ]
-        )
+        # Send the processed video with an InlineKeyboardButton for removing stream
         await bot.send_document(
             chat_id=message.chat.id,
             document=output_filename,
-            caption=caption,
-            reply_markup=reply_markup
+            caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("Remove Stream", callback_data=f"remove_stream:{message.message_id}")]]
+            )
         )
 
         # Clean up - remove original and processed files
@@ -142,19 +136,5 @@ async def process_forwarded_video(bot, message: Message):
     except Exception as e:
         await ms.edit(f"An error occurred: {e}")
 
-@app.on_callback_query()
-async def callback_handler(bot, query):
-    if query.data.startswith("stream_auto_") or query.data.startswith("stream_subtitle_"):
-        # Extract the file_id from the callback data
-        parts = query.data.split("_")
-        file_id = parts[-1]
-
-        # Implement your logic here to handle stream options
-        # For example, if the user clicked on "Remove stream", you can delete the stream
-
-        # Dummy response for demonstration
-        await query.answer("Stream option clicked!")
-
 if __name__ == "__main__":
     app.run()
-
