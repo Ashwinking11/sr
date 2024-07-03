@@ -92,7 +92,7 @@ async def start_command(bot, message: Message):
         "To use me, simply forward a video to this chat, and I will process it for you.\n\n"
         "Owner: [@atxbots](https://t.me/atxbots)"
     )
-    await message.reply(welcome_text, parse_mode='markdown')
+    await message.reply(welcome_text, parse_mode='MarkdownV2')
 
 @app.on_message(filters.video & filters.forwarded)
 async def process_forwarded_video(bot, message: Message):
