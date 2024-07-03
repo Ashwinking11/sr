@@ -2,17 +2,16 @@ import os
 import time
 import math
 import subprocess
-from pyrogram.enums import ParseMode
 from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
-from config import BOT_TOKEN, API_ID, API_HASH
 
 # Initialize your Pyrogram client
 app = Client(
     "stream_remover_bot",
-    bot_token=BOT_TOKEN,
-    api_id=API_ID,
-    api_hash=API_HASH
+    bot_token="YOUR_BOT_TOKEN_HERE",
+    api_id=12345,  # Replace with your API_ID
+    api_hash="YOUR_API_HASH_HERE"
 )
 
 # Directory for storing downloaded files
@@ -55,11 +54,36 @@ async def progress_callback(current, total, message, start_time):
         await message.edit(
             text=tmp,
             reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Remove Stream", callback_data=f"remove_stream:{message.message_id}")]]
+                [[InlineKeyboardButton("Owner", url='https://t.me/atxbots')]]
             )
         )
     except Exception as e:
         print(f"Error updating progress: {e}")
+
+async def upload_progress_callback(current, total, message, start_time):
+    now = time.time()
+    elapsed_time = now - start_time
+    if elapsed_time == 0:
+        elapsed_time = 1  # Avoid division by zero
+
+    speed = current / elapsed_time
+    percentage = current * 100 / total
+
+    progress_str = "[{0}{1}]".format(
+        ''.join(["⬢" for _ in range(math.floor(percentage / 10))]),
+        ''.join(["⬡" for _ in range(10 - math.floor(percentage / 10))])
+    )
+    tmp = progress_str + f"\n\nUploading... {round(percentage, 2)}%"
+
+    try:
+        await message.edit(
+            text=tmp,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("Owner", url='https://t.me/atxbots')]]
+            )
+        )
+    except Exception as e:
+        print(f"Error updating upload progress: {e}")
 
 def human_readable_size(size):
     power = 1024
@@ -88,7 +112,7 @@ async def start_command(bot, message: Message):
         "To use me, simply forward a video to this chat, and I will process it for you.\n\n"
         "Owner: [@atxbots](https://t.me/atxbots)"
     )
-    await message.reply(welcome_text, parse_mode="markdown")
+    await message.reply(welcome_text, parse_mode=ParseMode.MARKDOWN)
 
 @app.on_message(filters.video & filters.forwarded)
 async def process_forwarded_video(bot, message: Message):
@@ -117,14 +141,22 @@ async def process_forwarded_video(bot, message: Message):
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
 
-        # Send the processed video with an InlineKeyboardButton for removing stream
+        # Send upload progress message
+        upload_message = await bot.send_message(
+            chat_id=message.chat.id,
+            text="Preparing to upload...",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("Owner", url='https://t.me/atxbots')]]
+            )
+        )
+
+        # Upload the processed video with progress callback
         await bot.send_document(
             chat_id=message.chat.id,
             document=output_filename,
             caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Remove Stream", callback_data=f"remove_stream:{message.message_id}")]]
-            )
+            progress=upload_progress_callback,
+            progress_args=(upload_message, time.time())
         )
 
         # Clean up - remove original and processed files
@@ -139,3 +171,4 @@ async def process_forwarded_video(bot, message: Message):
 
 if __name__ == "__main__":
     app.run()
+
