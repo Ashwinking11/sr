@@ -5,7 +5,8 @@ import subprocess
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
-from config import BOT_TOKEN, API_ID, API_HASH  # Import credentials from config.py
+from config import BOT_TOKEN, API_ID, API_HASH, MONGODB_URI  # Import credentials and config from config.py
+from motor import motor_asyncio  # Import motor
 
 # Initialize your Pyrogram client
 app = Client(
@@ -21,6 +22,10 @@ DOWNLOADS_DIR = "downloads"
 # Ensure the downloads directory exists
 if not os.path.exists(DOWNLOADS_DIR):
     os.makedirs(DOWNLOADS_DIR)
+
+# Initialize Motor client
+motor_client = motor_asyncio.AsyncIOMotorClient(MONGODB_URI)
+db = motor_client.get_database()  # Get the default database
 
 PROGRESS_TEMPLATE = """
 Progress: {0}%
@@ -141,6 +146,16 @@ async def process_forwarded_video(bot, message: Message):
 
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
+
+        # Store information in MongoDB using motor
+        document = {
+            'file_id': file_id,
+            'file_path': output_filename,
+            'processed_size': processed_size,
+            'processing_time': processing_time,
+            'timestamp': int(time.time())
+        }
+        await db.processed_videos.insert_one(document)
 
         # Send upload progress message
         upload_message = await bot.send_message(
