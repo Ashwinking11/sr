@@ -117,11 +117,19 @@ async def process_forwarded_video(bot, message: Message):
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
 
-        # Send the processed video
+        # Send the processed video with stream options
+        caption = f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}"
+        reply_markup = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("Auto", callback_data=f"stream_auto_{file_id}")],
+                [InlineKeyboardButton("Subtitle", callback_data=f"stream_subtitle_{file_id}")]
+            ]
+        )
         await bot.send_document(
             chat_id=message.chat.id,
             document=output_filename,
-            caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}"
+            caption=caption,
+            reply_markup=reply_markup
         )
 
         # Clean up - remove original and processed files
@@ -133,6 +141,19 @@ async def process_forwarded_video(bot, message: Message):
 
     except Exception as e:
         await ms.edit(f"An error occurred: {e}")
+
+@app.on_callback_query()
+async def callback_handler(bot, query):
+    if query.data.startswith("stream_auto_") or query.data.startswith("stream_subtitle_"):
+        # Extract the file_id from the callback data
+        parts = query.data.split("_")
+        file_id = parts[-1]
+
+        # Implement your logic here to handle stream options
+        # For example, if the user clicked on "Remove stream", you can delete the stream
+
+        # Dummy response for demonstration
+        await query.answer("Stream option clicked!")
 
 if __name__ == "__main__":
     app.run()
