@@ -2,6 +2,7 @@ import os
 import time
 import math
 import asyncio
+import subprocess
 import imageio_ffmpeg as ffmpeg
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
@@ -121,12 +122,15 @@ async def process_forwarded_video(bot, message: Message):
 
         os.remove(file_path)
         os.remove(output_filename)
-        except subprocess.CalledProcessError as e:
+
+    except subprocess.CalledProcessError as e:
         await ms.edit(f"Error processing video: {e}")
+
     except Exception as e:
         await ms.edit(f"An error occurred: {e}")
 
-if name == "main":
+if __name__ == "__main__":
     if not os.path.exists("downloads"):
         os.makedirs("downloads")
     app.run()
+
