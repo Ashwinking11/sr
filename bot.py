@@ -2,6 +2,7 @@ import os
 import time
 import math
 import subprocess
+from pyrogram.enums import ParseMode
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from config import BOT_TOKEN, API_ID, API_HASH
