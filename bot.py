@@ -5,8 +5,8 @@ import asyncio
 import subprocess
 import imageio_ffmpeg as ffmpeg
 from pyrogram import Client, filters
-from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
+from pyrogram.errors import Unauthorized
 from config import BOT_TOKEN, API_ID, API_HASH
 
 # Initialize your Pyrogram client
@@ -16,6 +16,12 @@ app = Client(
     api_id=API_ID,
     api_hash=API_HASH
 )
+
+# Define bot owner ID (replace with your own bot owner ID)
+BOT_OWNER = 6121610691
+
+# Set of admin user IDs (replace with actual admin IDs)
+ADMIN_IDS = {7177667220}
 
 PROGRESS_TEMPLATE = """
 Progress: {0}%
@@ -75,6 +81,9 @@ def time_formatter(seconds):
                 (f"{seconds}s, " if seconds else ""))
     return time_str.strip(', ')
 
+def is_admin(user_id):
+    return user_id == BOT_OWNER or user_id in ADMIN_IDS
+
 @app.on_message(filters.command("start"))
 async def start_command(bot, message: Message):
     welcome_text = (
@@ -83,7 +92,7 @@ async def start_command(bot, message: Message):
         "To use me, simply forward a video to this chat, and I will process it for you.\n\n"
         "Owner: [@atxbots](https://t.me/atxbots)"
     )
-    await message.reply(welcome_text, parse_mode=ParseMode.MARKDOWN)
+    await message.reply(welcome_text, parse_mode='markdown')
 
 @app.on_message(filters.video & filters.forwarded)
 async def process_forwarded_video(bot, message: Message):
@@ -181,11 +190,22 @@ async def callback_handler(bot, query: CallbackQuery):
     except Exception as e:
         await query.answer(f"An error occurred: {e}")
 
-def get_available_streams(filename):
-    # Function to determine available audio and subtitle streams
-    # Implement your logic to extract stream information from the video file
-    # Replace with your actual implementation
-    return "2", "English"
+@app.on_message(filters.command("admincomment") & filters.user(BOT_OWNER))
+async def admin_comment_command(bot, message: Message):
+    try:
+        # Get the user and comment from the command
+        command_parts = message.text.strip().split(maxsplit=1)
+        if len(command_parts) < 2:
+            await message.reply("Please provide a comment.")
+            return
+        
+        comment = command_parts[1]
+        
+        # Reply to the original message with the admin comment
+        await message.reply(f"Admin Comment: {comment}")
+
+    except Exception as e:
+        await message.reply(f"An error occurred: {e}")
 
 if __name__ == "__main__":
     if not os.path.exists("downloads"):
