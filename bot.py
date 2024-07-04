@@ -122,7 +122,7 @@ async def process_forwarded_video(bot, message: Message):
 
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
-       
+        
         # Send the processed video
         await bot.send_document(
             chat_id=message.chat.id,
