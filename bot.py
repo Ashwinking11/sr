@@ -1,3 +1,4 @@
+
 import os
 import time
 import math
@@ -122,7 +123,7 @@ async def process_forwarded_video(bot, message: Message):
 
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
-        
+
         # Send the processed video
         await bot.send_document(
             chat_id=message.chat.id,
@@ -150,5 +151,5 @@ async def process_forwarded_video(bot, message: Message):
     except Exception as e:
         await ms.edit(f"An error occurred: {e}")
 
-if name == "main":
+if __name__ == "__main__":
     app.run()
