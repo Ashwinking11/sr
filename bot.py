@@ -4,7 +4,7 @@ import math
 import subprocess
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
 from config import BOT_TOKEN, API_ID, API_HASH, DATABASE_URL
 from motor.motor_asyncio import AsyncIOMotorClient
 
@@ -61,7 +61,7 @@ async def progress_callback(current, total, message, start_time):
     )
 
     # Throttle updates to every 10 seconds
-    message_id = message.id  # Changed from message.message_id to message.id
+    message_id = message.id
     if message_id not in last_update_time or (now - last_update_time[message_id]) > 10:
         try:
             await message.edit(
@@ -120,36 +120,78 @@ async def process_forwarded_video(bot, message: Message):
             await ms.edit("Download failed or file is incomplete.")
             return
 
-        start_time = time.time()
-        output_filename = os.path.join(DOWNLOADS_DIR, f"processed_{file_id}.mp4")
-
-        # Run ffmpeg command to remove audio and subtitles
-        ffmpeg_cmd = [
-            'ffmpeg', '-i', file_path,
-            '-c:v', 'copy', '-an', '-sn',
-            output_filename
+        # Extract streams info using ffprobe
+        ffprobe_cmd = [
+            'ffprobe', '-v', 'error', '-show_entries', 'stream=index,codec_type', '-of', 'json', file_path
         ]
-        print("FFmpeg command:", " ".join(ffmpeg_cmd))  # Print the command for debugging
+        result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            await ms.edit(f"Error extracting stream info: {result.stderr}")
+            return
+        
+        streams_info = result.stdout
+        streams = [
+            {"index": stream["index"], "type": stream["codec_type"]}
+            for stream in json.loads(streams_info)["streams"]
+        ]
+
+        buttons = [
+            InlineKeyboardButton(
+                f"Remove {stream['type']} stream {stream['index']}",
+                callback_data=f"remove_stream:{file_id}:{stream['index']}:{stream['type']}"
+            ) for stream in streams if stream['type'] in ['audio', 'subtitle']
+        ]
+
+        await ms.edit(
+            "Select the streams you want to remove:",
+            reply_markup=InlineKeyboardMarkup([buttons])
+        )
+
+    except subprocess.CalledProcessError as e:
+        await ms.edit(f"Error processing video: {e}")
+
+    except Exception as e:
+        await ms.edit(f"An error occurred: {e}")
+
+@app.on_callback_query(filters.regex(r"remove_stream"))
+async def remove_stream_callback(bot, query: CallbackQuery):
+    _, file_id, stream_index, stream_type = query.data.split(":")
+    file_path = os.path.join(DOWNLOADS_DIR, f"{file_id}.mp4")
+    output_filename = os.path.join(DOWNLOADS_DIR, f"processed_{file_id}.mp4")
+
+    # Run ffmpeg command to remove the selected stream
+    ffmpeg_cmd = [
+        'ffmpeg', '-i', file_path,
+        '-map', f'0:v',
+        '-map', f'-0:{stream_index}',
+        '-c:v', 'copy',
+        output_filename
+    ]
+    
+    ms = await query.message.reply("Removing stream...")
+
+    start_time = time.time()
+    try:
         result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            print("FFmpeg error output:", result.stderr)
             await ms.edit(f"Error processing video with FFmpeg: {result.stderr}")
             return
 
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
 
-        # Send the processed video
+        # Send the processed video with upload progress callback
         await bot.send_document(
-            chat_id=message.chat.id,
+            chat_id=query.message.chat.id,
             document=output_filename,
-            caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}"
+            caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}",
+            progress=progress_callback, progress_args=(ms, time.time())
         )
 
         # Save to MongoDB
         video_data = {
             "file_id": file_id,
-            "original_size": file_info.file_size,
+            "original_size": os.path.getsize(file_path),
             "processed_size": processed_size,
             "processing_time": processing_time,
             "timestamp": start_time
