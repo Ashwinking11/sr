@@ -35,6 +35,9 @@ Speed: {3}/s
 ETA: {4}
 """
 
+# Dictionary to store the last update time for each message
+last_update_time = {}
+
 async def progress_callback(current, total, message, start_time):
     now = time.time()
     elapsed_time = now - start_time
@@ -57,15 +60,19 @@ async def progress_callback(current, total, message, start_time):
         time_formatter(eta)
     )
 
-    try:
-        await message.edit(
-            text=tmp,
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Owner", url='https://t.me/atxbots')]]
+    # Throttle updates to every 10 seconds
+    message_id = message.message_id
+    if message_id not in last_update_time or (now - last_update_time[message_id]) > 10:
+        try:
+            await message.edit(
+                text=tmp,
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("Owner", url='https://t.me/atxbots')]]
+                )
             )
-        )
-    except Exception as e:
-        print(f"Error updating progress: {e}")
+            last_update_time[message_id] = now
+        except Exception as e:
+            print(f"Error updating progress: {e}")
 
 def human_readable_size(size):
     power = 1024
