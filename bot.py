@@ -115,6 +115,11 @@ async def process_forwarded_video(bot, message: Message):
         # Download the video file
         await bot.download_media(message, file_path, progress=progress_callback, progress_args=(ms, time.time()))
 
+        # Verify the file is completely downloaded by checking file size
+        if not os.path.exists(file_path) or os.path.getsize(file_path) != file_info.file_size:
+            await ms.edit("Download failed or file is incomplete.")
+            return
+
         start_time = time.time()
         output_filename = os.path.join(DOWNLOADS_DIR, f"processed_{file_id}.mp4")
 
@@ -125,7 +130,11 @@ async def process_forwarded_video(bot, message: Message):
             output_filename
         ]
         print("FFmpeg command:", " ".join(ffmpeg_cmd))  # Print the command for debugging
-        subprocess.run(ffmpeg_cmd, check=True)
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print("FFmpeg error output:", result.stderr)
+            await ms.edit(f"Error processing video with FFmpeg: {result.stderr}")
+            return
 
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
