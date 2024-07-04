@@ -1,13 +1,12 @@
 import os
 import time
 import math
-import asyncio
 import subprocess
-import imageio_ffmpeg as ffmpeg
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
-from pyrogram.errors import Unauthorized
-from config import BOT_TOKEN, API_ID, API_HASH
+from pyrogram.enums import ParseMode
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from config import BOT_TOKEN, API_ID, API_HASH, DATABASE_URL
+from motor.motor_asyncio import AsyncIOMotorClient
 
 # Initialize your Pyrogram client
 app = Client(
@@ -17,11 +16,17 @@ app = Client(
     api_hash=API_HASH
 )
 
-# Define bot owner ID (replace with your own bot owner ID)
-BOT_OWNER = 6121610691
+# MongoDB connection
+mongo_client = AsyncIOMotorClient(DATABASE_URL)
+db = mongo_client["stream_remover_db"]
+collection = db["videos"]
 
-# Set of admin user IDs (replace with actual admin IDs)
-ADMIN_IDS = {7177667220}
+# Directory for storing downloaded files
+DOWNLOADS_DIR = "downloads"
+
+# Ensure the downloads directory exists
+if not os.path.exists(DOWNLOADS_DIR):
+    os.makedirs(DOWNLOADS_DIR)
 
 PROGRESS_TEMPLATE = """
 Progress: {0}%
@@ -81,9 +86,6 @@ def time_formatter(seconds):
                 (f"{seconds}s, " if seconds else ""))
     return time_str.strip(', ')
 
-def is_admin(user_id):
-    return user_id == BOT_OWNER or user_id in ADMIN_IDS
-
 @app.on_message(filters.command("start"))
 async def start_command(bot, message: Message):
     welcome_text = (
@@ -92,7 +94,7 @@ async def start_command(bot, message: Message):
         "To use me, simply forward a video to this chat, and I will process it for you.\n\n"
         "Owner: [@atxbots](https://t.me/atxbots)"
     )
-    await message.reply(welcome_text, parse_mode='Markdown')
+    await message.reply(welcome_text, parse_mode=ParseMode.MARKDOWN)
 
 @app.on_message(filters.video & filters.forwarded)
 async def process_forwarded_video(bot, message: Message):
@@ -101,37 +103,44 @@ async def process_forwarded_video(bot, message: Message):
 
         file_info = message.video
         file_id = file_info.file_id
-        file_size = file_info.file_size
-        file_path = f"downloads/{file_id}.mp4"
+        file_path = os.path.join(DOWNLOADS_DIR, f"{file_id}.mp4")
 
-        if file_size > 2 * 1024 * 1024 * 1024:
-            await ms.edit("Error: The video file is too large. Please send a smaller file.")
-            return
-
+        # Download the video file
         await bot.download_media(message, file_path, progress=progress_callback, progress_args=(ms, time.time()))
 
         start_time = time.time()
-        output_filename = f"processed_{file_id}.mp4"
-        ffmpeg_cmd = (
-            ffmpeg.get_ffmpeg_exe(), '-i', file_path,
-            '-c:v', 'copy',
-            '-an', '-sn',
+        output_filename = os.path.join(DOWNLOADS_DIR, f"processed_{file_id}.mp4")
+
+        # Run ffmpeg command to remove audio and subtitles
+        ffmpeg_cmd = [
+            'ffmpeg', '-i', file_path,
+            '-c:v', 'copy', '-an', '-sn',
             output_filename
-        )
+        ]
+        print("FFmpeg command:", " ".join(ffmpeg_cmd))  # Print the command for debugging
         subprocess.run(ffmpeg_cmd, check=True)
 
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
-        await ms.edit(f"Processing complete.\n"
-                      f"Size: {human_readable_size(processed_size)}\n"
-                      f"Processing Time: {time_formatter(processing_time)}")
 
+        # Send the processed video
         await bot.send_document(
             chat_id=message.chat.id,
             document=output_filename,
             caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}"
         )
 
+        # Save to MongoDB
+        video_data = {
+            "file_id": file_id,
+            "original_size": file_info.file_size,
+            "processed_size": processed_size,
+            "processing_time": processing_time,
+            "timestamp": start_time
+        }
+        await collection.insert_one(video_data)
+
+        # Clean up - remove original and processed files
         os.remove(file_path)
         os.remove(output_filename)
 
@@ -141,66 +150,5 @@ async def process_forwarded_video(bot, message: Message):
     except Exception as e:
         await ms.edit(f"An error occurred: {e}")
 
-@app.on_callback_query()
-async def callback_handler(bot, query: CallbackQuery):
-    try:
-        file_id = query.data.split("_")[-1]
-        output_filename = f"processed_{file_id}.mp4"
-
-        if query.data.startswith("remove_audio"):
-            # Remove audio stream
-            ffmpeg_cmd = (
-                ffmpeg.get_ffmpeg_exe(), '-i', output_filename,
-                '-c:v', 'copy', '-an',
-                f"removed_audio_{output_filename}"
-            )
-            subprocess.run(ffmpeg_cmd, check=True)
-            await query.answer("Audio stream removed.")
-
-        elif query.data.startswith("remove_subtitles"):
-            # Remove subtitle stream
-            ffmpeg_cmd = (
-                ffmpeg.get_ffmpeg_exe(), '-i', output_filename,
-                '-c:v', 'copy', '-c:s', 'copy', '-sn',
-                f"removed_subtitles_{output_filename}"
-            )
-            subprocess.run(ffmpeg_cmd, check=True)
-            await query.answer("Subtitles removed.")
-
-        # Upload the processed file
-        await bot.send_document(
-            chat_id=query.message.chat.id,
-            document=f"removed_{output_filename}",
-            caption="Processed video with selected streams removed."
-        )
-
-        os.remove(output_filename)
-        os.remove(f"removed_{output_filename}")
-
-    except subprocess.CalledProcessError as e:
-        await query.answer(f"Error: {e}")
-
-    except Exception as e:
-        await query.answer(f"An error occurred: {e}")
-
-@app.on_message(filters.command("admincomment") & filters.user(BOT_OWNER))
-async def admin_comment_command(bot, message: Message):
-    try:
-        # Get the user and comment from the command
-        command_parts = message.text.strip().split(maxsplit=1)
-        if len(command_parts) < 2:
-            await message.reply("Please provide a comment.")
-            return
-        
-        comment = command_parts[1]
-        
-        # Reply to the original message with the admin comment
-        await message.reply(f"Admin Comment: {comment}")
-
-    except Exception as e:
-        await message.reply(f"An error occurred: {e}") 
-
 if __name__ == "__main__":
-    if not os.path.exists("downloads"):
-        os.makedirs("downloads")
     app.run()
