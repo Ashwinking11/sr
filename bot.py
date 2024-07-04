@@ -3,7 +3,7 @@ import os
 import time
 import math
 import subprocess
-import json  # Add this import
+import json
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
@@ -139,8 +139,8 @@ async def process_forwarded_video(bot, message: Message):
 
         buttons = [
             InlineKeyboardButton(
-                f"Remove {stream['type']} stream {stream['index']}",
-                callback_data=f"remove_stream:{file_id}:{stream['index']}:{stream['type']}"
+                f"Remove {stream['type'][0]}{stream['index']}",
+                callback_data=f"rm:{file_id}:{stream['index']}:{stream['type'][0]}"
             ) for stream in streams if stream['type'] in ['audio', 'subtitle']
         ]
 
@@ -155,7 +155,7 @@ async def process_forwarded_video(bot, message: Message):
     except Exception as e:
         await ms.edit(f"An error occurred: {e}")
 
-@app.on_callback_query(filters.regex(r"remove_stream"))
+@app.on_callback_query(filters.regex(r"rm:"))
 async def remove_stream_callback(bot, query: CallbackQuery):
     _, file_id, stream_index, stream_type = query.data.split(":")
     file_path = os.path.join(DOWNLOADS_DIR, f"{file_id}.mp4")
