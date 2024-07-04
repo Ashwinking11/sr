@@ -5,8 +5,8 @@ import subprocess
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
-from config import BOT_TOKEN, API_ID, API_HASH, MONGODB_URI  # Import credentials and config from config.py
-from motor import motor_asyncio  # Import motor
+from config import BOT_TOKEN, API_ID, API_HASH, DATABASE_URL
+from motor.motor_asyncio import AsyncIOMotorClient
 
 # Initialize your Pyrogram client
 app = Client(
@@ -16,16 +16,17 @@ app = Client(
     api_hash=API_HASH
 )
 
+# MongoDB connection
+mongo_client = AsyncIOMotorClient(DATABASE_URL)
+db = mongo_client["stream_remover_db"]
+collection = db["videos"]
+
 # Directory for storing downloaded files
 DOWNLOADS_DIR = "downloads"
 
 # Ensure the downloads directory exists
 if not os.path.exists(DOWNLOADS_DIR):
     os.makedirs(DOWNLOADS_DIR)
-
-# Initialize Motor client
-motor_client = motor_asyncio.AsyncIOMotorClient(MONGODB_URI)
-db = motor_client.get_database()  # Get the default database
 
 PROGRESS_TEMPLATE = """
 Progress: {0}%
@@ -65,31 +66,6 @@ async def progress_callback(current, total, message, start_time):
         )
     except Exception as e:
         print(f"Error updating progress: {e}")
-
-async def upload_progress_callback(current, total, message, start_time):
-    now = time.time()
-    elapsed_time = now - start_time
-    if elapsed_time == 0:
-        elapsed_time = 1  # Avoid division by zero
-
-    speed = current / elapsed_time
-    percentage = current * 100 / total
-
-    progress_str = "[{0}{1}]".format(
-        ''.join(["⬢" for _ in range(math.floor(percentage / 10))]),
-        ''.join(["⬡" for _ in range(10 - math.floor(percentage / 10))])
-    )
-    tmp = progress_str + f"\n\nUploading... {round(percentage, 2)}%"
-
-    try:
-        await message.edit(
-            text=tmp,
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Owner", url='https://t.me/atxbots')]]
-            )
-        )
-    except Exception as e:
-        print(f"Error updating upload progress: {e}")
 
 def human_readable_size(size):
     power = 1024
@@ -146,34 +122,23 @@ async def process_forwarded_video(bot, message: Message):
 
         processing_time = time.time() - start_time
         processed_size = os.path.getsize(output_filename)
-
-        # Store information in MongoDB using motor
-        document = {
-            'file_id': file_id,
-            'file_path': output_filename,
-            'processed_size': processed_size,
-            'processing_time': processing_time,
-            'timestamp': int(time.time())
-        }
-        await db.processed_videos.insert_one(document)
-
-        # Send upload progress message
-        upload_message = await bot.send_message(
-            chat_id=message.chat.id,
-            text="Preparing to upload...",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Owner", url='https://t.me/atxbots')]]
-            )
-        )
-
-        # Upload the processed video with progress callback
+       
+        # Send the processed video
         await bot.send_document(
             chat_id=message.chat.id,
             document=output_filename,
-            caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}",
-            progress=upload_progress_callback,
-            progress_args=(upload_message, time.time())
+            caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}"
         )
+
+        # Save to MongoDB
+        video_data = {
+            "file_id": file_id,
+            "original_size": file_info.file_size,
+            "processed_size": processed_size,
+            "processing_time": processing_time,
+            "timestamp": start_time
+        }
+        await collection.insert_one(video_data)
 
         # Clean up - remove original and processed files
         os.remove(file_path)
@@ -185,5 +150,5 @@ async def process_forwarded_video(bot, message: Message):
     except Exception as e:
         await ms.edit(f"An error occurred: {e}")
 
-if __name__ == "__main__":
+if name == "main":
     app.run()
