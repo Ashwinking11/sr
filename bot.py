@@ -1,3 +1,4 @@
+
 import os
 import time
 import math
@@ -59,6 +60,9 @@ async def progress_callback(current, total, message, start_time):
         human_readable_size(speed),
         time_formatter(eta)
     )
+
+    # Debugging: print message object
+    print(message)
 
     # Throttle updates to every 10 seconds
     message_id = message.message_id
