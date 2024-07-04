@@ -1,4 +1,3 @@
-
 import os
 import time
 import math
@@ -61,11 +60,8 @@ async def progress_callback(current, total, message, start_time):
         time_formatter(eta)
     )
 
-    # Debugging: print message object
-    print(message)
-
     # Throttle updates to every 10 seconds
-    message_id = message.message_id
+    message_id = message.id  # Changed from message.message_id to message.id
     if message_id not in last_update_time or (now - last_update_time[message_id]) > 10:
         try:
             await message.edit(
