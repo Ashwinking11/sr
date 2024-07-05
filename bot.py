@@ -1,212 +1,126 @@
 import os
 import time
-import math
-import subprocess
 from pyrogram import Client, filters
-from pyrogram.enums import ParseMode
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
-from config import BOT_TOKEN, API_ID, API_HASH, DATABASE_URL
-from motor.motor_asyncio import AsyncIOMotorClient
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from moviepy.editor import VideoFileClip, AudioFileClip
+import config
+from progress import progress_for_pyrogram
 
-# Initialize your Pyrogram client
-app = Client(
-    "stream_remover_bot",
-    bot_token=BOT_TOKEN,
-    api_id=API_ID,
-    api_hash=API_HASH
-)
+# Initialize Pyrogram Client
+app = Client("my_bot", api_id=config.api_id, api_hash=config.api_hash, bot_token=config.bot_token)
 
-# MongoDB connection
-mongo_client = AsyncIOMotorClient(DATABASE_URL)
-db = mongo_client["stream_remover_db"]
-collection = db["videos"]
-
-# Directory for storing downloaded files
-DOWNLOADS_DIR = "downloads"
-
-# Ensure the downloads directory exists
-if not os.path.exists(DOWNLOADS_DIR):
-    os.makedirs(DOWNLOADS_DIR)
-
-PROGRESS_TEMPLATE = """
-Progress: {0}%
-Downloaded: {1} / {2}
-Speed: {3}/s
-ETA: {4}
-"""
-
-# Dictionary to store the last update time for each message
-last_update_time = {}
-
-async def progress_callback(current, total, message, start_time):
-    now = time.time()
-    elapsed_time = now - start_time
-    if elapsed_time == 0:
-        elapsed_time = 1  # Avoid division by zero
-
-    speed = current / elapsed_time
-    percentage = current * 100 / total
-    eta = (total - current) / speed
-
-    progress_str = "[{0}{1}]".format(
-        ''.join(["⬢" for _ in range(math.floor(percentage / 10))]),
-        ''.join(["⬡" for _ in range(10 - math.floor(percentage / 10))])
-    )
-    tmp = progress_str + PROGRESS_TEMPLATE.format(
-        round(percentage, 2),
-        human_readable_size(current),
-        human_readable_size(total),
-        human_readable_size(speed),
-        time_formatter(eta)
-    )
-
-    # Throttle updates to every 10 seconds
-    message_id = message.id
-    if message_id not in last_update_time or (now - last_update_time[message_id]) > 10:
-        try:
-            await message.edit(
-                text=tmp,
-                reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("Owner", url='https://t.me/atxbots')]]
-                )
-            )
-            last_update_time[message_id] = now
-        except Exception as e:
-            print(f"Error updating progress: {e}")
-
-def human_readable_size(size):
-    power = 1024
-    n = 0
-    power_labels = {0: '', 1: 'Ki', 2: 'Mi', 3: 'Gi', 4: 'Ti'}
-    while size > power:
-        size /= power
-        n += 1
-    return f"{size:.2f} {power_labels[n]}B"
-
-def time_formatter(seconds):
-    minutes, seconds = divmod(int(seconds), 60)
-    hours, minutes = divmod(minutes, 60)
-    days, hours = divmod(hours, 24)
-    time_str = ((f"{days}d, " if days else "") +
-                (f"{hours}h, " if hours else "") +
-                (f"{minutes}m, " if minutes else "") +
-                (f"{seconds}s, " if seconds else ""))
-    return time_str.strip(', ')
+# State variables
+user_state = {}
 
 @app.on_message(filters.command("start"))
-async def start_command(bot, message: Message):
-    welcome_text = (
-        "Hello! I am the Stream Remover Bot.\n\n"
-        "I can help you remove audio and subtitles from video files.\n\n"
-        "To use me, simply forward a video to this chat, and I will process it for you.\n\n"
-        "Owner: [@atxbots](https://t.me/atxbots)"
-    )
-    await message.reply(welcome_text, parse_mode=ParseMode.MARKDOWN)
+async def start(client, message: Message):
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Video Trimmer", callback_data="video_trimmer")],
+        [InlineKeyboardButton("Audio Remover", callback_data="audio_remover")],
+        [InlineKeyboardButton("Audio Replacer", callback_data="audio_replacer")],
+        [InlineKeyboardButton("Video to Audio", callback_data="video_to_audio")],
+    ])
+    await message.reply("Choose an option:", reply_markup=keyboard)
 
-@app.on_message(filters.video & filters.forwarded)
-async def process_forwarded_video(bot, message: Message):
-    try:
-        ms = await message.reply("Processing video...")
+@app.on_message(filters.command("help"))
+async def help(client, message: Message):
+    await message.reply("Send me a video or audio file, and I can trim, remove audio, replace audio, or extract audio.")
 
-        file_info = message.video
-        file_id = file_info.file_id
-        file_path = os.path.join(DOWNLOADS_DIR, f"{file_id}.mp4")
+@app.on_callback_query()
+async def handle_callback_query(client, callback_query: CallbackQuery):
+    data = callback_query.data
+    user_id = callback_query.from_user.id
+    user_state[user_id] = data
+    if data == "video_trimmer":
+        await callback_query.message.reply("Send me a video to trim.")
+    elif data == "audio_remover":
+        await callback_query.message.reply("Send me a video to remove audio from.")
+    elif data == "audio_replacer":
+        await callback_query.message.reply("Send me the video whose audio you want to replace, followed by the new audio file.")
+    elif data == "video_to_audio":
+        await callback_query.message.reply("Send me a video to extract audio from.")
 
-        # Download the video file
-        await bot.download_media(message, file_path, progress=progress_callback, progress_args=(ms, time.time()))
-
-        # Verify the file is completely downloaded by checking file size
-        if not os.path.exists(file_path) or os.path.getsize(file_path) != file_info.file_size:
-            await ms.edit("Download failed or file is incomplete.")
-            return
-
-        # Extract streams info using ffprobe
-        ffprobe_cmd = [
-            'ffprobe', '-v', 'error', '-show_entries', 'stream=index,codec_type', '-of', 'json', file_path
-        ]
-        result = subprocess.run(ffprobe_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            await ms.edit(f"Error extracting stream info: {result.stderr}")
-            return
-        
-        streams_info = result.stdout
-        streams = [
-            {"index": stream["index"], "type": stream["codec_type"]}
-            for stream in json.loads(streams_info)["streams"]
-        ]
-
-        buttons = [
-            InlineKeyboardButton(
-                f"Remove {stream['type'][0]}{stream['index']}",
-                callback_data=f"r:{file_id}:{stream['index']}"
-            ) for stream in streams if stream['type'] in ['audio', 'subtitle']
-        ]
-
-        await ms.edit(
-            "Select the streams you want to remove:",
-            reply_markup=InlineKeyboardMarkup([buttons])
-        )
-
-    except subprocess.CalledProcessError as e:
-        await ms.edit(f"Error processing video: {e}")
-
-    except Exception as e:
-        await ms.edit(f"An error occurred: {e}")
-
-@app.on_callback_query(filters.regex(r"r:"))
-async def remove_stream_callback(bot, query: CallbackQuery):
-    _, file_id, stream_index = query.data.split(":")
-    file_path = os.path.join(DOWNLOADS_DIR, f"{file_id}.mp4")
-    output_filename = os.path.join(DOWNLOADS_DIR, f"processed_{file_id}.mp4")
-
-    # Run ffmpeg command to remove the selected stream
-    ffmpeg_cmd = [
-        'ffmpeg', '-i', file_path,
-        '-map', f'0:v',
-        '-map', f'-0:{stream_index}',
-        '-c:v', 'copy',
-        output_filename
-    ]
+@app.on_message(filters.video)
+async def handle_video(client, message: Message):
+    user_id = message.from_user.id
+    if user_id not in user_state:
+        await message.reply("Please select an option first.")
+        return
     
-    ms = await query.message.reply("Removing stream...")
-
-    start_time = time.time()
-    try:
-        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            await ms.edit(f"Error processing video with FFmpeg: {result.stderr}")
-            return
-
-        processing_time = time.time() - start_time
-        processed_size = os.path.getsize(output_filename)
-
-        # Send the processed video with upload progress callback
-        await bot.send_document(
-            chat_id=query.message.chat.id,
-            document=output_filename,
-            caption=f"Processed video\nSize: {human_readable_size(processed_size)}\nProcessing Time: {time_formatter(processing_time)}",
-            progress=progress_callback, progress_args=(ms, time.time())
-        )
-
-        # Save to MongoDB
-        video_data = {
-            "file_id": file_id,
-            "original_size": os.path.getsize(file_path),
-            "processed_size": processed_size,
-            "processing_time": processing_time,
-            "timestamp": start_time
-        }
-        await collection.insert_one(video_data)
-
-        # Clean up - remove original and processed files
+    action = user_state[user_id]
+    video = message.video
+    file_path = await client.download_media(video, progress=progress_for_pyrogram, progress_args=("Downloading...", message, time.time(), client))
+    
+    if action == "video_trimmer":
+        await message.reply("Please specify the start and end times in seconds (e.g., 10 30).")
+        user_state[user_id] = ("trimming", file_path)
+    
+    elif action == "audio_remover":
+        await message.reply("Removing audio...")
+        clip = VideoFileClip(file_path)
+        clip = clip.without_audio()
+        output_path = "no_audio_video.mp4"
+        clip.write_videofile(output_path)
+        await client.send_video(message.chat.id, output_path, progress=progress_for_pyrogram, progress_args=("Uploading...", message, time.time(), client))
         os.remove(file_path)
-        os.remove(output_filename)
+        os.remove(output_path)
+    
+    elif action == "audio_replacer":
+        await message.reply("Send me the new audio file.")
+        user_state[user_id] = ("replacing", file_path)
+    
+    elif action == "video_to_audio":
+        await message.reply("Extracting audio...")
+        clip = VideoFileClip(file_path)
+        output_path = "extracted_audio.mp3"
+        clip.audio.write_audiofile(output_path)
+        await client.send_audio(message.chat.id, output_path, progress=progress_for_pyrogram, progress_args=("Uploading...", message, time.time(), client))
+        os.remove(file_path)
+        os.remove(output_path)
 
-    except subprocess.CalledProcessError as e:
-        await ms.edit(f"Error processing video: {e}")
+@app.on_message(filters.audio)
+async def handle_audio(client, message: Message):
+    user_id = message.from_user.id
+    if user_id not in user_state or not isinstance(user_state[user_id], tuple):
+        await message.reply("Please select an option first.")
+        return
+    
+    action, video_path = user_state[user_id]
+    if action == "replacing":
+        audio = message.audio
+        audio_path = await client.download_media(audio, progress=progress_for_pyrogram, progress_args=("Downloading...", message, time.time(), client))
+        
+        await message.reply("Replacing audio...")
+        video_clip = VideoFileClip(video_path)
+        audio_clip = AudioFileClip(audio_path)
+        new_video_clip = video_clip.set_audio(audio_clip)
+        output_path = "replaced_audio_video.mp4"
+        new_video_clip.write_videofile(output_path)
+        
+        await client.send_video(message.chat.id, output_path, progress=progress_for_pyrogram, progress_args=("Uploading...", message, time.time(), client))
+        os.remove(video_path)
+        os.remove(audio_path)
+        os.remove(output_path)
+        del user_state[user_id]
 
-    except Exception as e:
-        await ms.edit(f"An error occurred: {e}")
+@app.on_message(filters.text)
+async def handle_text(client, message: Message):
+    user_id = message.from_user.id
+    if user_id in user_state and isinstance(user_state[user_id], tuple):
+        action, file_path = user_state[user_id]
+        if action == "trimming":
+            try:
+                start, end = map(int, message.text.split())
+                await message.reply("Trimming video...")
+                clip = VideoFileClip(file_path).subclip(start, end)
+                output_path = "trimmed_video.mp4"
+                clip.write_videofile(output_path)
+                await client.send_video(message.chat.id, output_path, progress=progress_for_pyrogram, progress_args=("Uploading...", message, time.time(), client))
+                os.remove(file_path)
+                os.remove(output_path)
+                del user_state[user_id]
+            except ValueError:
+                await message.reply("Invalid format. Please specify the start and end times in seconds (e.g., 10 30).")
 
 if __name__ == "__main__":
     app.run()
