@@ -1,280 +1,356 @@
-import os
-import time
-import math
-import subprocess
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
-from pyrogram.errors import MessageNotModified
-from config import BOT_TOKEN, API_ID, API_HASH
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import ffmpeg
+import os
 
-# Initialize Pyrogram client
-app = Client("my_bot", bot_token=BOT_TOKEN, api_id=API_ID, api_hash=API_HASH)
+# Initialize the bot
+app = Client("my_bot", api_id="YOUR_API_ID", api_hash="YOUR_API_HASH", bot_token="YOUR_BOT_TOKEN")
 
-# Directory for storing downloaded files
-DOWNLOADS_DIR = "downloads"
-
-# Ensure the downloads directory exists
-if not os.path.exists(DOWNLOADS_DIR):
-    os.makedirs(DOWNLOADS_DIR)
-
-# Progress template for status updates
-PROGRESS_TEMPLATE = """
-Progress: {0}%
-Downloaded: {1} / {2}
-Speed: {3}/s
-ETA: {4}
-"""
-
-# Dictionary to store the last update time for each message
-last_update_time = {}
-
-# Dictionary to store the user's current command state
-user_state = {}
-
-# Function to display human-readable file size
-def human_readable_size(size):
-    power = 1024
-    n = 0
-    power_labels = {0: '', 1: 'Ki', 2: 'Mi', 3: 'Gi', 4: 'Ti'}
-    while size > power:
-        size /= power
-        n += 1
-    return f"{size:.2f} {power_labels[n]}B"
-
-# Function to format time duration
-def time_formatter(seconds):
-    minutes, seconds = divmod(int(seconds), 60)
-    hours, minutes = divmod(minutes, 60)
-    days, hours = divmod(hours, 24)
-    time_str = ((f"{days}d, " if days else "") +
-                (f"{hours}h, " if hours else "") +
-                (f"{minutes}m, " if minutes else "") +
-                (f"{seconds}s, " if seconds else ""))
-    return time_str.strip(', ')
-
-# Progress callback function to update progress during downloads and uploads
-async def progress_callback(current, total, message, start_time):
-    now = time.time()
-    elapsed_time = now - start_time
-    if elapsed_time == 0:
-        elapsed_time = 1  # Avoid division by zero
-
-    speed = current / elapsed_time
-    percentage = current * 100 / total
-    eta = (total - current) / speed
-
-    progress_str = "[{0}{1}]".format(
-        ''.join(["⬢" for _ in range(math.floor(percentage / 10))]),
-        ''.join(["⬡" for _ in range(10 - math.floor(percentage / 10))])
-    )
-    tmp = progress_str + PROGRESS_TEMPLATE.format(
-        round(percentage, 2),
-        human_readable_size(current),
-        human_readable_size(total),
-        human_readable_size(speed),
-        time_formatter(eta)
-    )
-
-    # Throttle updates to every 10 seconds
-    message_id = message.message_id
-    if message_id not in last_update_time or (now - last_update_time[message_id]) > 10:
-        try:
-            await message.edit(
-                text=tmp,
-                reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("Owner", url='https://t.me/atxbots')]]
-                )
-            )
-            last_update_time[message_id] = now
-        except MessageNotModified:
-            pass
-        except Exception as e:
-            print(f"Error updating progress: {e}")
-
-# Function to run ffmpeg commands
-def run_ffmpeg(cmd):
-    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if result.returncode != 0:
-        raise Exception(f"FFmpeg error: {result.stderr.decode()}")
-
-# Function to download media with progress updates
-async def download_media(client, message, path):
-    start_time = time.time()
-    size = message.video.file_size if message.video else message.audio.file_size
-    progress = lambda current, total: progress_callback(current, total, message, start_time)
-    file_path = await client.download_media(message, path, progress=progress)
-    return file_path
-
-# Command handler for '/start' command
+# Main menu with features
 @app.on_message(filters.command("start"))
-async def start_command(client, message: Message):
-    welcome_text = (
-        "Hello! I am your Bot.\n\n"
-        "I can help you with audio and video tasks.\n\n"
-        "To use me, send me a video or audio file and choose an option."
-    )
-    await message.reply(welcome_text)
+async def start(client, message):
+    keyboard = InlineKeyboardMarkup([
+        # Add more buttons as needed
+        [InlineKeyboardButton("🖼️ Thumbnail Extractor", callback_data="thumbnail_extractor")],
+        [InlineKeyboardButton("✏️ Caption and Buttons Editor", callback_data="caption_editor")],
+        [InlineKeyboardButton("🎵 Audio & Subtitles Remover", callback_data="audio_subtitle_remover")],
+        [InlineKeyboardButton("🎵 Audio & Subtitles Extractor", callback_data="audio_subtitle_extractor")],
+        [InlineKeyboardButton("✂️ Video Trimmer", callback_data="video_trimmer")],
+        [InlineKeyboardButton("➕ Video Merger", callback_data="video_merger")],
+        [InlineKeyboardButton("🔇 Mute Audio in Video File", callback_data="mute_audio")],
+        [InlineKeyboardButton("🎥 Video and Audio Merger", callback_data="video_audio_merger")],
+        [InlineKeyboardButton("🎥 Video and Subtitle Merger", callback_data="video_subtitle_merger")],
+        [InlineKeyboardButton("🎥 Video to GIF Converter", callback_data="video_to_gif")],
+        [InlineKeyboardButton("✂️ Video Splitter", callback_data="video_splitter")],
+        [InlineKeyboardButton("🖼️ Screenshot Generator", callback_data="screenshot_generator")],
+        [InlineKeyboardButton("🖼️ Manual Screenshot Generator", callback_data="manual_screenshot")],
+        [InlineKeyboardButton("📹 Video Sample Generator", callback_data="video_sample_generator")],
+        [InlineKeyboardButton("🎵 Video to Audio Converter", callback_data="video_to_audio")],
+        [InlineKeyboardButton("📉 Video Optimizer", callback_data="video_optimizer")],
+        [InlineKeyboardButton("🔀 Video Converter", callback_data="video_converter")],
+        [InlineKeyboardButton("✏️ Video Renamer", callback_data="video_renamer")],
+        [InlineKeyboardButton("ℹ️ Media Information", callback_data="media_info")],
+        [InlineKeyboardButton("📁 Create Archive File", callback_data="create_archive")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel")],
+    ])
+    await message.reply("Select an option from below 👇", reply_markup=keyboard)
 
-# Command handler for '/help' command
-@app.on_message(filters.command("help"))
-async def help_command(client, message: Message):
-    help_text = (
-        "Here are the available commands:\n\n"
-        "/start - Start the bot\n"
-        "/help - Show this help message\n"
-        "/trim_video - Trim a video\n"
-        "/remove_audio - Remove audio from a video\n"
-        "/merge_audio - Merge audio with a video\n"
-        "/video_to_audio - Extract audio from a video\n"
-    )
-    await message.reply(help_text)
+# Utilities
+def download_file(client, message):
+    file_id = message.video.file_id if message.video else message.document.file_id
+    return client.download_media(file_id)
 
-# Command handler for '/trim_video' command
-@app.on_message(filters.command("trim_video"))
-async def trim_video_command(client, message: Message):
-    args = message.text.split()
-    if len(args) != 3:
-        await message.reply("Please specify the start and end times in seconds (e.g., /trim_video 10 30).")
-        return
-
+def run_ffmpeg_process(input_path, output_path, process):
     try:
-        start_time = int(args[1])
-        end_time = int(args[2])
-        if start_time >= end_time:
-            await message.reply("End time must be greater than start time.")
-            return
+        process(input=input_path, output=output_path).run()
+        return output_path
+    except Exception as e:
+        return str(e)
 
-        user_state[message.from_user.id] = {
-            "command": "trim_video",
-            "start_time": start_time,
-            "end_time": end_time
-        }
-        await message.reply("Please send the video you want to trim.")
+# Thumbnail Extractor
+@app.on_callback_query(filters.regex("thumbnail_extractor"))
+async def thumbnail_extractor(client, callback_query):
+    await callback_query.message.edit("Send me a video file to extract thumbnails.")
 
-    except ValueError:
-        await message.reply("Please provide valid start and end times in seconds.")
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        output_path = "thumbnail.jpg"
+        process = ffmpeg.input(file_path).filter('thumbnail', n=1).output(output_path, vframes=1)
+        result = run_ffmpeg_process(file_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(file_path)
+        os.remove(output_path)
 
-# Command handler for '/remove_audio' command
-@app.on_message(filters.command("remove_audio"))
-async def remove_audio_command(client, message: Message):
-    user_state[message.from_user.id] = {
-        "command": "remove_audio"
-    }
-    await message.reply("Send me a video to remove audio from.")
+# Caption and Buttons Editor
+# To be implemented according to your specific needs.
 
-# Command handler for '/merge_audio' command
-@app.on_message(filters.command("merge_audio"))
-async def merge_audio_command(client, message: Message):
-    user_state[message.from_user.id] = {
-        "command": "merge_audio",
-        "step": "send_video"
-    }
-    await message.reply("Send me the video whose audio you want to replace.")
+# Audio & Subtitles Remover
+@app.on_callback_query(filters.regex("audio_subtitle_remover"))
+async def audio_subtitle_remover(client, callback_query):
+    await callback_query.message.edit("Send me a video file to remove audio or subtitles.")
 
-# Command handler for '/video_to_audio' command
-@app.on_message(filters.command("video_to_audio"))
-async def video_to_audio_command(client, message: Message):
-    user_state[message.from_user.id] = {
-        "command": "video_to_audio"
-    }
-    await message.reply("Send me a video to extract audio from.")
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        output_path = "output_no_audio.mp4"
+        process = ffmpeg.input(file_path).output(output_path, an=None, sn=None)
+        result = run_ffmpeg_process(file_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(file_path)
+        os.remove(output_path)
 
-# Message handler for videos
-@app.on_message(filters.video)
-async def handle_video(client, message: Message):
-    user_id = message.from_user.id
-    if user_id not in user_state:
-        return
+# Audio & Subtitles Extractor
+@app.on_callback_query(filters.regex("audio_subtitle_extractor"))
+async def audio_subtitle_extractor(client, callback_query):
+    await callback_query.message.edit("Send me a video file to extract audio or subtitles.")
 
-    command = user_state[user_id]["command"]
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        audio_output = "output_audio.aac"
+        subtitle_output = "output_subtitles.srt"
+        audio_process = ffmpeg.input(file_path).output(audio_output, vn=None)
+        subtitle_process = ffmpeg.input(file_path).output(subtitle_output, vn=None, an=None, map='0:s:0')
+        run_ffmpeg_process(file_path, audio_output, audio_process)
+        run_ffmpeg_process(file_path, subtitle_output, subtitle_process)
+        await message.reply_document(audio_output)
+        await message.reply_document(subtitle_output)
+        os.remove(file_path)
+        os.remove(audio_output)
+        os.remove(subtitle_output)
 
-    if command == "trim_video":
-        start_time = user_state[user_id]["start_time"]
-        end_time = user_state[user_id]["end_time"]
-        video_file = await download_media(client, message, DOWNLOADS_DIR)
-        output_file = os.path.join(DOWNLOADS_DIR, f"trimmed_{os.path.basename(video_file)}.mp4")
+# Video Trimmer
+@app.on_callback_query(filters.regex("video_trimmer"))
+async def video_trimmer(client, callback_query):
+    await callback_query.message.edit("Send me a video file and specify start and end times to trim.")
 
-        try:
-            cmd = [
-                "ffmpeg", "-i", video_file, "-ss", str(start_time), "-to", str(end_time),
-                "-c", "copy", output_file
-            ]
-            run_ffmpeg(cmd)
-            await message.reply_video(output_file)
-        except Exception as e:
-            await message.reply(f"Error trimming video: {e}")
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        start_time = "00:00:30"  # Replace with dynamic time from user input
+        end_time = "00:01:00"  # Replace with dynamic time from user input
+        output_path = "trimmed_video.mp4"
+        process = ffmpeg.input(file_path, ss=start_time, to=end_time).output(output_path)
+        result = run_ffmpeg_process(file_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(file_path)
+        os.remove(output_path)
 
-        os.remove(video_file)
-        os.remove(output_file)
-        user_state.pop(user_id)
+# Video Merger
+@app.on_callback_query(filters.regex("video_merger"))
+async def video_merger(client, callback_query):
+    await callback_query.message.edit("Send me the videos you want to merge.")
 
-    elif command == "remove_audio":
-        video_file = await download_media(client, message, DOWNLOADS_DIR)
-        output_file = os.path.join(DOWNLOADS_DIR, f"no_audio_{os.path.basename(video_file)}.mp4")
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        video1_path = download_file(client, message)
+        # Wait for the second file upload
+        video2_path = download_file(client, message)
+        output_path = "merged_video.mp4"
+        process = ffmpeg.input(video1_path).input(video2_path).output(output_path)
+        result = run_ffmpeg_process(video1_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(video1_path)
+        os.remove(video2_path)
+        os.remove(output_path)
 
-        try:
-            cmd = [
-                "ffmpeg", "-i", video_file, "-c", "copy", "-an", output_file
-            ]
-            run_ffmpeg(cmd)
-            await message.reply_video(output_file)
-        except Exception as e:
-            await message.reply(f"Error removing audio: {e}")
+# Mute Audio in Video File
+@app.on_callback_query(filters.regex("mute_audio"))
+async def mute_audio(client, callback_query):
+    await callback_query.message.edit("Send me a video file to mute the audio.")
 
-        os.remove(video_file)
-        os.remove(output_file)
-        user_state.pop(user_id)
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        output_path = "muted_video.mp4"
+        process = ffmpeg.input(file_path).output(output_path, an=None)
+        result = run_ffmpeg_process(file_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(file_path)
+        os.remove(output_path)
 
-    elif command == "merge_audio" and user_state[user_id]["step"] == "send_video":
-        user_state[user_id]["video_file"] = await download_media(client, message, DOWNLOADS_DIR)
-        user_state[user_id]["step"] = "send_audio"
-        await message.reply("Now send me the audio file you want to merge with this video.")
+# Video and Audio Merger
+@app.on_callback_query(filters.regex("video_audio_merger"))
+async def video_audio_merger(client, callback_query):
+    await callback_query.message.edit("Send me the video and audio files to merge.")
 
-# Command handler for audio files
-@app.on_message(filters.audio)
-async def handle_audio(client, message: Message):
-    user_id = message.from_user.id
-    if user_id not in user_state:
-        return
+    @app.on_message(filters.video | filters.audio)
+    async def handle_media(client, message):
+        video_path = download_file(client, message)
+        audio_path = download_file(client, message)
+        output_path = "merged_video_audio.mp4"
+        process = ffmpeg.input(video_path).input(audio_path).output(output_path)
+        result = run_ffmpeg_process(video_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(video_path)
+        os.remove(audio_path)
+        os.remove(output_path)
 
-    command = user_state[user_id]["command"]
+# Video and Subtitle Merger
+@app.on_callback_query(filters.regex("video_subtitle_merger"))
+async def video_subtitle_merger(client, callback_query):
+    await callback_query.message.edit("Send me the video and subtitle files to merge.")
 
-    if command == "merge_audio" and user_state[user_id]["step"] == "send_audio":
-        audio_file = await download_media(client, message, DOWNLOADS_DIR)
-        video_file = user_state[user_id]["video_file"]
-        output_file = os.path.join(DOWNLOADS_DIR, f"merged_{os.path.basename(video_file)}")
+    @app.on_message(filters.video | filters.document)
+    async def handle_media(client, message):
+        video_path = download_file(client, message)
+        subtitle_path = download_file(client, message)
+        output_path = "merged_video_subtitles.mp4"
+        process = ffmpeg.input(video_path).output(output_path, vf=f'subtitles={subtitle_path}')
+        result = run_ffmpeg_process(video_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(video_path)
+        os.remove(subtitle_path)
+        os.remove(output_path)
 
-        try:
-            cmd = [
-                "ffmpeg", "-i", video_file, "-i", audio_file, "-c:v", "copy", "-c:a", "aac",
-                "-strict", "experimental", output_file
-            ]
-            run_ffmpeg(cmd)
-            await message.reply_video(output_file)
-        except Exception as e:
-            await message.reply(f"Error merging audio: {e}")
+# Video to GIF Converter
+@app.on_callback_query(filters.regex("video_to_gif"))
+async def video_to_gif(client, callback_query):
+    await callback_query.message.edit("Send me a video file to convert to GIF.")
 
-        os.remove(video_file)
-        os.remove(audio_file)
-        os.remove(output_file)
-        user_state.pop(user_id)
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        output_path = "output.gif"
+        process = ffmpeg.input(file_path).output(output_path)
+        result = run_ffmpeg_process(file_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(file_path)
+        os.remove(output_path)
 
-    elif command == "video_to_audio":
-        video_file = await download_media(client, message, DOWNLOADS_DIR)
-        output_file = os.path.join(DOWNLOADS_DIR, f"{os.path.splitext(os.path.basename(video_file))[0]}.mp3")
+# Video Splitter
+@app.on_callback_query(filters.regex("video_splitter"))
+async def video_splitter(client, callback_query):
+    await callback_query.message.edit("Send me a video file to split.")
 
-        try:
-            cmd = [
-                "ffmpeg", "-i", video_file, "-q:a", "0", "-map", "a", output_file
-            ]
-            run_ffmpeg(cmd)
-            await message.reply_audio(output_file)
-        except Exception as e:
-            await message.reply(f"Error extracting audio: {e}")
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        output_path1 = "part1.mp4"
+        output_path2 = "part2.mp4"
+        midpoint = "00:01:00"  # Replace with dynamic time from user input
+        process1 = ffmpeg.input(file_path, to=midpoint).output(output_path1)
+        process2 = ffmpeg.input(file_path, ss=midpoint).output(output_path2)
+        run_ffmpeg_process(file_path, output_path1, process1)
+        run_ffmpeg_process(file_path, output_path2, process2)
+        await message.reply_document(output_path1)
+        await message.reply_document(output_path2)
+        os.remove(file_path)
+        os.remove(output_path1)
+        os.remove(output_path2)
 
-        os.remove(video_file)
-        os.remove(output_file)
-        user_state.pop(user_id)
+# Screenshot Generator
+@app.on_callback_query(filters.regex("screenshot_generator"))
+async def screenshot_generator(client, callback_query):
+    await callback_query.message.edit("Send me a video file to generate screenshots.")
 
-if __name__ == "__main__":
-    app.run()
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        output_path = "screenshot.png"
+        process = ffmpeg.input(file_path).filter('thumbnail', n=10).output(output_path, vframes=1)
+        result = run_ffmpeg_process(file_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(file_path)
+        os.remove(output_path)
+
+# Manual Screenshot Generator
+@app.on_callback_query(filters.regex("manual_screenshot"))
+async def manual_screenshot(client, callback_query):
+    await callback_query.message.edit("Send me a video file and specify the time to take a screenshot.")
+
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        screenshot_time = "00:00:15"  # Replace with dynamic time from user input
+        output_path = "manual_screenshot.png"
+        process = ffmpeg.input(file_path, ss=screenshot_time).output(output_path, vframes=1)
+        result = run_ffmpeg_process(file_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(file_path)
+        os.remove(output_path)
+
+# Video Sample Generator
+@app.on_callback_query(filters.regex("video_sample_generator"))
+async def video_sample_generator(client, callback_query):
+    await callback_query.message.edit("Send me a video file to generate a sample.")
+
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        output_path = "sample_video.mp4"
+        process = ffmpeg.input(file_path).output(output_path, t='00:00:10')
+        result = run_ffmpeg_process(file_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(file_path)
+        os.remove(output_path)
+
+# Video to Audio Converter
+@app.on_callback_query(filters.regex("video_to_audio"))
+async def video_to_audio(client, callback_query):
+    await callback_query.message.edit("Send me a video file to convert to audio.")
+
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        output_path = "output_audio.mp3"
+        process = ffmpeg.input(file_path).output(output_path)
+        result = run_ffmpeg_process(file_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(file_path)
+        os.remove(output_path)
+
+# Video Optimizer
+@app.on_callback_query(filters.regex("video_optimizer"))
+async def video_optimizer(client, callback_query):
+    await callback_query.message.edit("Send me a video file to optimize.")
+
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        output_path = "optimized_video.mp4"
+        process = ffmpeg.input(file_path).output(output_path, crf=23)
+        result = run_ffmpeg_process(file_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(file_path)
+        os.remove(output_path)
+
+# Video Converter
+@app.on_callback_query(filters.regex("video_converter"))
+async def video_converter(client, callback_query):
+    await callback_query.message.edit("Send me a video file to convert.")
+
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        output_path = "converted_video.mkv"  # Replace with dynamic output format from user input
+        process = ffmpeg.input(file_path).output(output_path)
+        result = run_ffmpeg_process(file_path, output_path, process)
+        await message.reply_document(result)
+        os.remove(file_path)
+        os.remove(output_path)
+
+# Video Renamer
+@app.on_callback_query(filters.regex("video_renamer"))
+async def video_renamer(client, callback_query):
+    await callback_query.message.edit("Send me a video file to rename.")
+
+    @app.on_message(filters.video)
+    async def handle_video(client, message):
+        file_path = download_file(client, message)
+        new_name = "new_video_name.mp4"  # Replace with dynamic name from user input
+        os.rename(file_path, new_name)
+        await message.reply_document(new_name)
+        os.remove(new_name)
+
+# Media Information
+@app.on_callback_query(filters.regex("media_info"))
+async def media_info(client, callback_query):
+    await callback_query.message.edit("Send me a media file to get its information.")
+
+    @app.on_message(filters.video | filters.document | filters.audio)
+    async def handle_media(client, message):
+        file_path = download_file(client, message)
+        process = ffmpeg.probe(file_path)
+        await message.reply(str(process))
+        os.remove(file_path)
+
+# Create Archive File
+@app.on_callback_query(filters.regex("create_archive"))
+async def create_archive(client, callback_query):
+    await callback_query.message.edit("Send me files to create an archive (zip, rar, 7z).")
+
+    @app.on_message(filters.document)
+    async def handle_files(client, message):
+        # This will depend on how many files and their structure.
+        # You will likely need to manage them and package them using Python's `zipfile` or `shutil`.
+        pass
+
+# Cancel command
+@app.on_callback_query(filters.regex("cancel"))
+async def cancel(client, callback_query):
+    await callback_query.message.edit("Cancelled.", reply_markup=None)
+
+# Start the bot
+app.run()
